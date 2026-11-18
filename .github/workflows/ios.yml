@@ -1,0 +1,95 @@
+name: iOS
+
+# Two jobs on purpose:
+#   core  - PearlKit logic, Linux, seconds, no Mac minutes burned
+#   apple - real iOS build plus simulator tests on a macOS runner (Xcode 27)
+#
+# `xcode-27` is the GitHub runner image label with macOS 26 and Xcode 27. If the
+# label ever disappears, fall back to `macos-26` plus
+# `sudo xcode-select -s /Applications/Xcode_27.app`.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core:
+    name: PearlKit core (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Swift
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev
+          curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
+          tar zxf swiftly-$(uname -m).tar.gz
+          ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+          . "$HOME/.local/share/swiftly/env.sh"
+          export PATH="$HOME/.local/share/swiftly/bin:$PATH"
+          swiftly install 6.4 --use
+          hash -r
+          swift --version
+          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+      - name: Format check
+        run: swift format lint --recursive Sources Tests
+        working-directory: Packages/PearlKit
+      - name: Test
+        run: swift test
+        working-directory: Packages/PearlKit
+
+  apple:
+    name: iOS build and simulator tests
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          brew install xcodegen xcbeautify || brew install xcodegen
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-spm-${{ hashFiles('project.yml') }}
+          restore-keys: ${{ runner.os }}-spm-
+      - name: Generate the project
+        run: xcodegen generate
+      - name: Build and test
+        run: |
+          set +e
+          mkdir -p .build
+          xcodebuild -project PearlPlayer.xcodeproj -scheme PearlPlayer \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -derivedDataPath .build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            test > .build/build.log 2>&1
+          status=$?
+          set -e
+          xcbeautify < .build/build.log || true
+          if [ "$status" -ne 0 ]; then
+            echo "=================== DIAGNOSTICS ==================="
+            grep -n -B4 -A8 "error:" .build/build.log | head -300
+            RESULT="$(ls -d .build/DerivedData/Logs/Test/*.xcresult 2>/dev/null | head -1)"
+            if [ -n "$RESULT" ]; then
+              echo "------------------- XCRESULT SUMMARY -------------------"
+              xcrun xcresulttool get test-results summary --path "$RESULT" --format json 2>&1 | head -60
+              echo "------------------- XCRESULT FAILURES ------------------"
+              xcrun xcresulttool get test-results tests --path "$RESULT" --format json 2>&1 \
+                | python3 scripts/xcresult-failures.py 2>&1 | head -60
+            fi
+            echo "=================== END DIAGNOSTICS ==============="
+          fi
+          exit "$status"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: .build/DerivedData/Logs/Test/*.xcresult
+          if-no-files-found: ignore

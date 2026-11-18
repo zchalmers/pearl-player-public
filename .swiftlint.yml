@@ -1,0 +1,49 @@
+# SwiftLint rules for Pearl Player. Run with the wrapper in ~/.local/bin on Linux,
+# or plain `swiftlint` after `brew install swiftlint` on a Mac.
+included:
+  - App
+  - Packages
+
+excluded:
+  - .build
+  - "**/.build"
+  - DerivedData
+  - "**/DerivedData"
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - first_where
+  - force_unwrapping
+  - implicit_return
+  - redundant_nil_coalescing
+  - sorted_imports
+  - toggle_bool
+  - unneeded_parentheses_in_closure_argument
+  - vertical_parameter_alignment_on_call
+
+disabled_rules:
+  - todo
+  # "master playlist" and "master branch" are the correct technical terms.
+  - inclusive_language
+
+line_length:
+  warning: 120
+  error: 160
+  ignores_comments: true
+
+identifier_name:
+  min_length:
+    warning: 2
+  excluded:
+    - id
+    - x
+    - y
+
+type_body_length:
+  warning: 500
+  error: 700
+
+file_length:
+  warning: 700
+  error: 1000

@@ -1,0 +1,186 @@
+name: Release IPA
+
+# Builds a Release archive with your own signing certificate and profile.
+# Secrets: P12_BASE64, P12_PASSWORD, PROFILE_BASE64 and SIGN_IDENTITY.
+# Set the IOS_BUNDLE_ID repository variable to match your own profile.
+# The default is the generic example identifier used in project.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_name:
+        description: Name for the produced IPA
+        default: PearlPlayer.ipa
+  push:
+    tags: ['v*']
+
+jobs:
+  ipa:
+    name: Signed IPA
+    runs-on: xcode-27
+    timeout-minutes: 90
+    env:
+      PEARL_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'org.example.pearlplayer' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          brew install xcodegen xcbeautify || brew install xcodegen
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-spm-${{ hashFiles('project.yml') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Generate the project
+        run: xcodegen generate
+
+      - name: Import the signing certificate
+        env:
+          P12_BASE64: ${{ secrets.P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$P12_BASE64" | base64 --decode > /tmp/dev.p12
+          security create-keychain -p actions temp.keychain
+          security set-keychain-settings -lut 3600 temp.keychain
+          security unlock-keychain -p actions temp.keychain
+          security import /tmp/dev.p12 -k temp.keychain -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions temp.keychain
+          security list-keychains -d user -s temp.keychain
+          security default-keychain -s temp.keychain
+          security find-identity -v -p codesigning temp.keychain
+          rm -f /tmp/dev.p12
+
+      - name: Archive, sign and pack the IPA
+        env:
+          PROFILE_BASE64: ${{ secrets.PROFILE_BASE64 }}
+          SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          mkdir -p .build exports
+
+          # One shell for archive, sign and pack on purpose: an `archive` action
+          # does not leave its .app where a later step would guess, so there is no
+          # path to hand along.
+          echo "== archiving =="
+          set +e
+          xcodebuild -project PearlPlayer.xcodeproj -scheme PearlPlayer \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath .build/PearlPlayer.xcarchive \
+            -derivedDataPath .build/DerivedData \
+            PEARL_BUNDLE_ID="$PEARL_BUNDLE_ID" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            archive > .build/archive.log 2>&1
+          status=$?
+          set -e
+          xcbeautify < .build/archive.log || true
+          if [ "$status" -ne 0 ]; then
+            echo "=================== ARCHIVE ERRORS ==================="
+            grep -n -B4 -A8 "error:" .build/archive.log | head -300
+            echo "====================================================="
+            exit "$status"
+          fi
+
+          APP=".build/PearlPlayer.xcarchive/Products/Applications/PearlPlayer.app"
+          if [ ! -d "$APP" ]; then
+            echo "the pinned path was empty, here is what the archive produced:"
+            find .build -maxdepth 8 -type d -name '*.app' | head -10
+            APP="$(find .build -maxdepth 8 -type d -name 'PearlPlayer.app' | head -1 || true)"
+          fi
+          if [ -z "$APP" ] || [ ! -d "$APP" ]; then
+            echo "no app bundle was produced" >&2
+            find .build -maxdepth 5 -type d | head -30
+            exit 1
+          fi
+          echo "app: $APP"
+          du -sh "$APP"
+
+          echo "== entitlements straight out of the profile =="
+          echo "$PROFILE_BASE64" | base64 --decode > /tmp/dev.mobileprovision
+          # The profile has to travel inside the bundle. Signing alone does not
+          # embed it, and without it the device refuses the install.
+          cp /tmp/dev.mobileprovision "$APP/embedded.mobileprovision"
+          python3 - <<'PY' > /tmp/entitlements.plist
+          import plistlib, subprocess, sys
+          raw = subprocess.run(["openssl", "smime", "-inform", "der", "-verify", "-noverify",
+                                "-in", "/tmp/dev.mobileprovision"], capture_output=True, check=True).stdout
+          plistlib.dump(plistlib.loads(raw)["Entitlements"], sys.stdout.buffer)
+          PY
+          plutil -p /tmp/entitlements.plist | head -20
+
+          echo "== checking the built Info.plist actually carries the app's features =="
+          python3 - "$APP/Info.plist" <<'PY'
+          import os, plistlib, sys
+          path = sys.argv[1]
+          plist = plistlib.load(open(path, "rb"))
+          schemes = [s for entry in plist.get("CFBundleURLTypes", []) for s in entry.get("CFBundleURLSchemes", [])]
+          missing = []
+          if plist.get("CFBundleIdentifier") != os.environ["PEARL_BUNDLE_ID"]:
+              missing.append("bundle id")
+          for scheme in ("outplayer", "vlc-x-callback", "pearl"):
+              if scheme not in schemes:
+                  missing.append(f"url scheme {scheme}")
+          if "UILaunchScreen" not in plist:
+              missing.append("UILaunchScreen")
+          if "UIApplicationSceneManifest" not in plist:
+              missing.append("UIApplicationSceneManifest")
+          if not plist.get("CFBundleDocumentTypes"):
+              missing.append("document types")
+          if not plist.get("UIBackgroundModes"):
+              missing.append("background modes")
+          print("schemes:", schemes)
+          print("keys:", sorted(plist.keys()))
+          if missing:
+              print("MISSING FROM THE BUILT PLIST:", ", ".join(missing))
+              raise SystemExit(1)
+          print("built Info.plist is complete")
+          PY
+
+          echo "== embedded frameworks first =="
+          # An unsigned framework inside a signed app is exactly what makes a
+          # sideload die on launch.
+          if [ -d "$APP/Frameworks" ]; then
+            for item in "$APP/Frameworks"/*.framework "$APP/Frameworks"/*.dylib; do
+              [ -e "$item" ] || continue
+              echo "signing $(basename "$item")"
+              codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$item"
+            done
+          fi
+
+          echo "== signing the app =="
+          codesign --force --sign "$SIGN_IDENTITY" \
+            --entitlements /tmp/entitlements.plist \
+            --timestamp=none \
+            --generate-entitlement-der \
+            "$APP"
+          codesign --verify --verbose=2 "$APP"
+
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+          echo "bundle id: $BUNDLE_ID"
+          test "$BUNDLE_ID" = "$PEARL_BUNDLE_ID"
+
+          echo "== packing =="
+          rm -rf .build/Payload
+          mkdir -p .build/Payload
+          cp -R "$APP" .build/Payload/
+          (cd .build && zip -qry ../exports/PearlPlayer.ipa Payload)
+          ls -lh exports/PearlPlayer.ipa
+          unzip -l exports/PearlPlayer.ipa | head -12
+          shasum -a 256 exports/PearlPlayer.ipa | tee exports/PearlPlayer.ipa.sha256
+
+      - name: Upload the IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PearlPlayer-ipa
+          path: |
+            exports/PearlPlayer.ipa
+            exports/PearlPlayer.ipa.sha256

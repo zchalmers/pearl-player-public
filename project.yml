@@ -1,0 +1,99 @@
+# XcodeGen spec for Pearl Player. Generate with:  make generate   (needs `brew install xcodegen`)
+#
+# The project file is generated, never committed, so the same spec builds on a
+# Mac, in a Devin macOS session and on a GitHub runner.
+name: PearlPlayer
+
+options:
+  bundleIdPrefix: org.example
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+  xcodeVersion: "27.0"
+
+settings:
+  base:
+    PEARL_BUNDLE_ID: org.example.pearlplayer
+    SWIFT_VERSION: "6.0"
+    # Swift 6 language mode, default MainActor isolation, full strict concurrency.
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    CLANG_ENABLE_MODULES: YES
+
+packages:
+  PearlKit:
+    path: Packages/PearlKit
+  # VLCKit (libvlc 4.0) via SwiftPM. This is the playback engine: MKV and every
+  # other container, libass ASS/SSA subtitles, image subtitles, track selection,
+  # network protocols and renderers all come from here. Pinned exactly because
+  # the product is a 4.0 alpha.
+  VLCKitSPM:
+    url: https://github.com/virtualox/vlckit-spm
+    exactVersion: 4.0.0-alpha.21
+
+targets:
+  PearlPlayer:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - "Resources/Info.plist"
+    dependencies:
+      - package: PearlKit
+        product: PearlKit
+      - package: VLCKitSPM
+        product: VLCKitSPM
+    settings:
+      base:
+        # Override PEARL_BUNDLE_ID at build time to match your own profile.
+        PRODUCT_BUNDLE_IDENTIFIER: "$(PEARL_BUNDLE_ID)"
+        PRODUCT_NAME: PearlPlayer
+        # Use the hand written plist. Do NOT use XcodeGen's `info:` block here:
+        # it GENERATES a plist at that path from `properties` and silently
+        # replaces the real one, which cost the URL schemes, the launch screen
+        # declaration and the scene manifest, meaning the Stremio handoff would
+        # not have worked at all.
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: App/Resources/Info.plist
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        SUPPORTS_MACCATALYST: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+        # VLCKit ships static libs plus a big xcframework: keep the module map.
+        OTHER_LDFLAGS: "$(inherited) -ObjC"
+
+  PearlPlayerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [AppTests]
+    dependencies:
+      - target: PearlPlayer
+      - package: PearlKit
+        product: PearlKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(PEARL_BUNDLE_ID).tests"
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  PearlPlayer:
+    build:
+      targets:
+        PearlPlayer: all
+        PearlPlayerTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - PearlPlayerTests
+    archive:
+      config: Release

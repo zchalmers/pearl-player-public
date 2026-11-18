@@ -1,0 +1,17 @@
+/*.xcodeproj
+xcuserdata/
+.build/
+DerivedData/
+.swiftpm/
+*.ipa
+*.app
+*.dSYM.zip
+.DS_Store
+exports/
+*.xcarchive/
+*.mobileprovision
+*.p12
+*.p8
+*.key
+.env
+.env.*

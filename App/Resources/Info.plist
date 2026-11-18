@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Pearl</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+
+	<!-- The application bundle identifier must match the selected signing profile. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).pearl</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>pearl</string>
+				<string>pearlplayer</string>
+			</array>
+		</dict>
+		<!-- Stremio's "Play in external player" setting only offers VLC and
+		     Outplayer. Both are scheme swaps, so claiming those schemes is what
+		     makes Stremio's own dropdown reach Pearl when the real apps are gone. -->
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).outplayer</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>outplayer</string>
+				<string>vlc</string>
+				<string>vlc-x-callback</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Video files opened from Files, AirDrop or another app's share sheet.
+	     No Share Extension is possible: the profile is one explicit App ID and
+	     extensions need their own, so document types are the supported route. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Video</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.movie</string>
+				<string>public.video</string>
+				<string>public.audiovisual-content</string>
+				<string>public.mpeg-4</string>
+				<string>public.mpeg</string>
+				<string>com.apple.quicktime-movie</string>
+				<string>com.microsoft.windows-media-wmv</string>
+				<string>org.matroska.mkv</string>
+				<string>public.avi</string>
+				<string>org.webmproject.webm</string>
+				<string>org.videolan.mpeg-ts</string>
+				<string>public.m3u-playlist</string>
+				<string>com.apple.mpegurl</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Files app access and in-place opening, which is how a player is expected
+	     to appear on iOS. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+
+	<!-- Background audio, so playback and the lock screen controls keep working
+	     when the app is not in front. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+
+	<!-- SMB, WebDAV, UPnP and DLNA discovery. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Pearl browses your local network to play videos from computers, NAS boxes and media servers.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_smb._tcp</string>
+		<string>_webdav._tcp</string>
+		<string>_http._tcp</string>
+		<string>_googlecast._tcp</string>
+	</array>
+
+	<!-- Streams arrive over plain http as often as https (debrid links, local
+	     servers, IPTV), and a player that cannot open http is not a player. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInMedia</key>
+		<true/>
+	</dict>
+
+	<!-- Only exempt encryption (HTTPS), so this stays false. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- iOS 27 gate 1: a launch screen declaration is mandatory. -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string></string>
+	</dict>
+
+	<!-- iOS 27 gate 2: scene based lifecycle is mandatory or the app will not
+	     launch. SwiftUI's App lifecycle supplies the scene delegate, so no
+	     UISceneConfigurations entry is needed. An empty UISceneConfigurations
+	     dictionary, which an earlier revision had, is not the same thing. -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
+
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>
